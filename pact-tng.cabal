@@ -1,0 +1,629 @@
+cabal-version:       3.8
+name:                pact-tng
+version:             5.4.1
+-- ^ 4 digit is prerelease, 3- or 2-digit for prod release
+synopsis:            Smart contract language library and REPL
+description:
+            Pact is a transactional, database-focused, Turing-incomplete, interpreted language for smart contracts,
+            logic to be deployed and executed on a blockchain/distributed ledger. For more information see
+            <http://kadena.io/pact>.
+homepage:            https://github.com/kadena-community/pact-5
+bug-reports:         https://github.com/kadena-community/pact-5/issues
+license:             BSD-3-Clause
+license-file:        LICENSE
+author:              Jose Cardona
+maintainer:          jose@kadena.io
+copyright:           Copyright (C) 2022 Kadena
+category:            Language
+build-type:          Simple
+
+extra-source-files:
+    cbits/musl/libm.h
+    cbits/musl/endian.h
+    cbits/musl/exp_data.h
+    cbits/musl/log_data.h
+    cbits/musl/pow_data.h
+    cbits/musl/sqrt_data.h
+    docs/builtins/**/*.md
+
+flag with-crypto
+  description: Enable crypto primitives
+  manual: True
+  default: True
+
+flag with-funcall-tracing
+  description: Enable Tracing on user function calls
+  manual: True
+  default: True
+
+flag with-native-tracing
+  description: Enable Tracing on pact primitives
+  manual: True
+  default: True
+
+library unsafe
+  visibility: public
+  hs-source-dirs: unsafe/src
+  default-language: Haskell2010
+  exposed-modules:
+    Data.Foldable.Unsafe
+    Data.List.Unsafe
+  build-depends:
+    , base >= 4.5 && < 5
+
+common pact-common
+  build-depends:
+    , Decimal
+    , attoparsec
+    , base
+    , base16-bytestring
+    , base64-bytestring
+    , bytestring
+    , cereal
+    , containers
+    , crypton-asn1-encoding
+    , crypton-asn1-types
+    , data-default
+    , deepseq
+    , direct-sqlite
+    , directory
+    , exceptions
+    , filepath
+    , hashable
+    , lens
+    , mtl
+    , pact-json
+    , pact-time >= 0.3
+    , parsers
+    , prettyprinter
+    , transformers
+    , text
+    , vector
+    , vector-algorithms
+    , megaparsec
+    , crypton >=1.1.2
+    , ram >=0.2.2
+    , safe-exceptions
+    , ralist >= 0.4.0.0
+    , haskeline
+    , semirings
+    , utf8-string
+    , exceptions
+    , array
+    , scientific
+    , serialise
+    , cborg
+    , clock
+    , unordered-containers
+    , deriving-compat
+    , ghc-bignum
+    , primitive
+    -- Legacy pact decoding
+    , bound
+    , aeson
+    , trifecta
+    , hashable
+    -- hyperlane deps
+    , binary
+    , wide-word
+    , ethereum
+    , template-haskell
+    , pact-tng:unsafe
+    , hashes >= 0.3
+
+  ghc-options: -Wall -Werror -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+  ghc-prof-options: -fprof-auto -fprof-auto-calls
+  default-language: Haskell2010
+  default-extensions:
+    OverloadedStrings
+    DeriveGeneric
+    DerivingStrategies
+    ViewPatterns
+    LambdaCase
+    TupleSections
+    BangPatterns
+    ScopedTypeVariables
+    FlexibleContexts
+    FlexibleInstances
+    NumericUnderscores
+    TypeOperators
+
+-- internal crypto lirbary
+library pact-crypto
+  default-language: Haskell2010
+  hs-source-dirs: crypto
+  build-depends:
+      poly
+    , mod
+    , primitive
+    , groups
+    , base
+    , semirings
+    , deepseq
+    , vector
+    , text
+    , base64-bytestring
+    , bytestring
+    , hashes >= 0.3
+    , safe-exceptions
+    , deepseq
+
+  exposed-modules:
+    Pact.Core.Crypto.Base64
+    Pact.Core.Crypto.Hash.Poseidon
+    Pact.Core.Crypto.Hash.Keccak256
+    Pact.Core.Crypto.Pairing
+    Pact.Core.Crypto.Pairing.Fields
+  if !(flag(with-crypto))
+    buildable: False
+
+library pact-request-api
+  import: pact-common
+  visibility: public
+  hs-source-dirs: pact-request-api
+  build-depends:
+      crypton-asn1-encoding
+    , crypton-asn1-types
+    , cereal
+    , pact-tng
+    , pact-tng:pact-crypto
+    , yaml
+    , lrucaching
+    , servant-server
+    , servant
+    , warp
+    , wai-cors
+    , wai-logger
+    , fast-logger
+  exposed-modules:
+    Pact.Core.Command.Types
+    Pact.Core.Command.Client
+    Pact.Core.Command.Crypto
+    Pact.Core.Command.RPC
+    Pact.Core.Command.Util
+    Pact.Core.Command.SigData
+    Pact.Core.Command.Server
+    Pact.Core.Command.Server.Config
+    Pact.Core.Command.Server.Servant
+    Pact.Core.Command.Server.History
+    Pact.Core.Crypto.WebAuthn.Cose.PublicKey
+    Pact.Core.Crypto.WebAuthn.Cose.PublicKeyWithSignAlg
+    Pact.Core.Crypto.WebAuthn.Cose.Registry
+    Pact.Core.Crypto.WebAuthn.Cose.SignAlg
+    Pact.Core.Crypto.WebAuthn.Cose.Verify
+
+library
+  import: pact-common
+  hs-source-dirs: pact
+
+  if (flag(with-crypto))
+    build-depends: pact-tng:pact-crypto
+  else
+    cpp-options: -DWITHOUT_CRYPTO
+
+  build-tool-depends:
+    , alex:alex
+    , happy:happy
+
+  other-modules:
+    -- TODO: Uncomment once this is finally fixed
+    -- and stops crapping out both LSP and our CI:
+    -- PackageInfo_pact_tng
+    Paths_pact_tng
+
+  exposed-modules:
+    Pact.Core.Compile
+    Pact.Core.Builtin
+    Pact.Core.Names
+    Pact.Core.Literal
+    Pact.Core.Guards
+    Pact.Core.Imports
+    Pact.Core.DefPacts.Types
+    Pact.Core.Hash
+    Pact.Core.Type
+    Pact.Core.Pretty
+    Pact.Core.Gas
+    Pact.Core.Gas.Types
+    Pact.Core.Gas.TableGasModel
+    Pact.Core.Gas.Utils
+    Pact.Core.Info
+    Pact.Core.Errors
+    Pact.Core.Persistence
+    Pact.Core.Persistence.Types
+    Pact.Core.Persistence.Utils
+    Pact.Core.Persistence.SQLite
+    Pact.Core.Persistence.MockPersistence
+    Pact.Core.PactValue
+    Pact.Core.Debug
+    Pact.Core.Capabilities
+    Pact.Core.ModRefs
+    Pact.Core.ChainData
+    Pact.Core.Environment
+    Pact.Core.Environment.Utils
+    Pact.Core.Environment.Types
+    Pact.Core.StableEncoding
+    Pact.Core.Principal
+    Pact.Core.Namespace
+    Pact.Core.RuntimeParsers
+    Pact.Core.Evaluate
+    Pact.Core.Scheme
+    Pact.Core.SPV
+    Pact.Core.SizeOf
+    Pact.Core.SizeOf.Deriving
+    Pact.Core.StackFrame
+    Pact.Core.Legacy.LegacyCodec
+    Pact.Core.TransitiveDependencies
+    Pact.Core.Verifiers
+    Pact.Core.Interpreter
+    Pact.Core.DeriveConTag
+    Pact.Core.Signer
+    Pact.Core.SatWord
+    Pact.Core.NativeShadowing
+
+     -- Syntax modules
+    Pact.Core.Syntax.ParseTree
+    Pact.Core.Syntax.Lexer
+    Pact.Core.Syntax.LexUtils
+    Pact.Core.Syntax.Parser
+
+    -- Core IR modules
+    Pact.Core.IR.Term
+    Pact.Core.IR.Desugar
+
+    -- Core IR Evaluator modules
+    Pact.Core.IR.Eval.Runtime
+    Pact.Core.IR.Eval.Runtime.Types
+    Pact.Core.IR.Eval.Runtime.Utils
+    Pact.Core.IR.Eval.CEK.Evaluator
+    Pact.Core.IR.Eval.CEK.Types
+    Pact.Core.IR.Eval.CEK.Utils
+    Pact.Core.IR.Eval.CEK.CoreBuiltin
+    Pact.Core.IR.ModuleHashing
+    Pact.Core.IR.ConstEval
+
+    Pact.Core.Trans.MPFR
+    Pact.Core.Version
+
+    -- Serialization
+    Pact.Core.Serialise
+    Pact.Core.Serialise.LegacyPact
+    Pact.Core.Serialise.LegacyPact.Types
+    Pact.Core.Serialise.CBOR_V1
+
+    -- WebAuthn
+    Pact.Crypto.WebAuthn.Cose.PublicKey
+    Pact.Crypto.WebAuthn.Cose.PublicKeyWithSignAlg
+    Pact.Crypto.WebAuthn.Cose.Registry
+    Pact.Crypto.WebAuthn.Cose.SignAlg
+
+    -- Hyperlane
+    Pact.Crypto.Hyperlane
+
+  -- SLH DSA
+    Pact.Crypto.SlhDsa.Parameters
+    Pact.Crypto.SlhDsa.SlhDsa
+    Pact.Crypto.SlhDsa.Addresses
+    Pact.Crypto.SlhDsa.MessageDigest
+    Pact.Crypto.SlhDsa.Signature
+    Pact.Crypto.SlhDsa.Utils
+    Pact.Crypto.SlhDsa.ChainwebSlhDsa
+
+    -- Coverage
+    Pact.Core.Coverage.Types
+
+  extra-libraries: mpfr
+
+library pact-repl
+  import: pact-common
+  hs-source-dirs: pact-repl
+  visibility: public
+
+  if (flag(with-crypto))
+    build-depends: pact-tng:pact-crypto
+  else
+    cpp-options: -DWITHOUT_CRYPTO
+
+  if (flag(with-funcall-tracing))
+    cpp-options: -DWITH_FUNCALL_TRACING
+
+  if (flag(with-native-tracing))
+    cpp-options: -DWITH_NATIVE_TRACING
+
+  exposed-modules:
+    Pact.Core.Repl
+    Pact.Core.Repl.Utils
+    Pact.Core.Repl.Runtime.ReplBuiltin
+    Pact.Core.Repl.Compile
+    Pact.Core.Repl.BuiltinDocs
+    Pact.Core.Repl.BuiltinDocs.Internal
+    Pact.Core.Repl.UserDocs
+
+    Pact.Core.IR.Eval.Direct.Evaluator
+    Pact.Core.IR.Eval.Direct.CoreBuiltin
+    Pact.Core.IR.Eval.Direct.ReplBuiltin
+    Pact.Core.IR.Eval.Direct.Types
+
+    Pact.Core.Typed.Term
+    Pact.Core.Typed.Type
+    Pact.Core.Typed.Infer
+
+    Pact.Core.Coverage
+
+  build-depends:
+    , pact-tng
+    , pact-tng:pact-crypto
+    , filepath
+    , pandoc
+
+library pact-lsp
+  import: pact-common
+  hs-source-dirs: pact-lsp
+
+  exposed-modules:
+    Pact.Core.LanguageServer
+    Pact.Core.LanguageServer.Utils
+    Pact.Core.LanguageServer.Renaming
+
+  build-depends:
+    , pact-tng
+    , pact-tng:pact-repl
+    , lsp
+    , lsp-types
+    , filepath
+
+executable gasmodel
+  import: pact-common
+  hs-source-dirs: gasmodel
+
+  main-is: Main.hs
+
+  build-depends:
+    , pact-tng
+    , pact-tng:pact-repl
+    , pact-tng:pact-request-api
+    , pact-tng:pact-crypto
+    , criterion
+    , terminal-progress-bar
+    , neat-interpolation
+    , hedgehog
+    , random
+    , pact-tng:test-utils
+
+  other-modules:
+    Pact.Core.GasModel.BuiltinsGas
+    Pact.Core.GasModel.ContractBench
+    Pact.Core.GasModel.Serialization
+    Pact.Core.GasModel.ModuleLoadBench
+    Pact.Core.GasModel.ModuleDepsBench
+    Pact.Core.GasModel.SigsBench
+    Pact.Core.GasModel.Utils
+
+  ghc-options:         -Wall -threaded -rtsopts -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+  ghc-prof-options:    -fprof-auto -fprof-auto-calls
+  default-language:    Haskell2010
+
+executable profile-tx
+  import: pact-common
+  hs-source-dirs: profile-tx
+
+  main-is: ProfileTx.hs
+
+  build-depends:
+    , pact-tng
+    , criterion
+    , terminal-progress-bar
+    , neat-interpolation
+
+  ghc-options:         -Wall -threaded -rtsopts -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+  ghc-prof-options:    -fprof-auto -fprof-auto-calls
+  default-language:    Haskell2010
+
+executable pact
+  import: pact-common
+  main-is: pact-repl/Main.hs
+
+  build-depends: base
+               , pact-tng
+               , pact-tng:pact-repl
+               , pact-tng:pact-lsp
+               , optparse-applicative
+               , pact-tng:pact-request-api
+               , yaml
+
+  ghc-options:         -Wall -threaded -rtsopts -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+  ghc-prof-options:    -fprof-auto -fprof-auto-calls
+  default-language:    Haskell2010
+
+  -- beware of the autogen modules. Remember to `cabal clean`!
+  other-modules:
+    -- TODO: Uncomment once this is finally fixed
+    -- and stops crapping out both LSP and our CI,
+    -- PackageInfo_pact_tng
+    Paths_pact_tng
+
+benchmark bench
+  type: exitcode-stdio-1.0
+  main-is: Bench.hs
+  build-depends:
+      base
+    , containers
+    , criterion
+    , data-default
+    , Decimal
+    , filepath
+    , mtl
+    , pact-tng
+    , text
+    , deepseq
+    , pact-time >= 0.3
+  ghc-options: -Wall -threaded -rtsopts "-with-rtsopts=-N"
+  hs-source-dirs: bench
+  default-language: Haskell2010
+
+library test-utils
+  visibility: public
+  hs-source-dirs: test-utils
+  default-language: Haskell2010
+  ghc-options:      -Wall -threaded -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+
+  default-extensions:
+    OverloadedStrings
+    ViewPatterns
+    LambdaCase
+    TupleSections
+    BangPatterns
+    ScopedTypeVariables
+    FlexibleContexts
+    FlexibleInstances
+
+  build-depends:
+    , aeson
+    , attoparsec
+    , base
+    , bound
+    , bytestring
+    , containers
+    , data-default
+    , Decimal
+    , QuickCheck
+    , deepseq
+    , directory
+    , exceptions
+    , hedgehog
+    , base16-bytestring
+    , filepath
+    , lens
+    , mtl
+    , text
+    , transformers
+    , pact-json
+    , pact-tng
+    , prettyprinter
+    , vector
+    , tasty
+    , tasty-hunit
+    , tasty-hedgehog
+    , tasty-golden
+    , serialise
+    , cborg
+    , groups
+    , semirings
+    , neat-interpolation
+    , pact-tng:pact-request-api
+    , pact-tng:unsafe
+    , pact-time
+
+  exposed-modules:
+    , Pact.Core.Gen
+    , Pact.Core.PactDbRegression
+
+test-suite core-tests
+  main-is:          PactCoreTests.hs
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   pact-tests
+  default-language: Haskell2010
+  ghc-options:      -Wall -threaded -rtsopts -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints
+
+  default-extensions:
+    OverloadedStrings
+    ViewPatterns
+    LambdaCase
+    TupleSections
+    BangPatterns
+    ScopedTypeVariables
+    FlexibleContexts
+    FlexibleInstances
+
+  build-depends:
+    , aeson
+    , attoparsec
+    , base
+    , bound
+    , bytestring
+    , containers
+    , data-default
+    , Decimal
+    , QuickCheck
+    , deepseq
+    , directory
+    , exceptions
+    , hedgehog
+    , base16-bytestring
+    , filepath
+    , lens
+    , mtl
+    , text
+    , transformers
+    , pact-json
+    , pact-tng
+    , prettyprinter
+    , vector
+    , megaparsec
+    , tasty
+    , tasty-hunit
+    , tasty-hedgehog
+    , tasty-golden
+    , tasty-wai
+    , http-types
+    , wai-extra
+    , serialise
+    , cborg
+    , groups
+    , semirings
+    , neat-interpolation
+    , pact-tng:pact-request-api
+    , pact-tng:pact-repl
+    , pact-tng:pact-lsp
+    , pact-tng:test-utils
+    , pact-tng:unsafe
+    , lsp-test >= 0.17
+    , lsp-types
+    , safe-exceptions
+    , http-conduit
+    , direct-sqlite
+    , servant
+    , servant-server
+    , servant-client
+    , lrucaching
+    , http-client
+    , warp
+    , xz
+    , unordered-containers
+    , temporary
+    , wai-logger
+    , fast-logger
+    , property-matchers
+    , hashes >= 0.3
+
+  other-modules:
+    , Pact.Core.Test.CommandTests
+    , Pact.Core.Test.ReplTests
+    , Pact.Core.Test.LexerParserTests
+    , Pact.Core.Test.LexerTests
+    , Pact.Core.Test.PersistenceTests
+    , Pact.Core.Test.SerialiseTests
+    , Pact.Core.Test.LegacySerialiseTests
+    , Pact.Core.Test.SizeOfTests
+    , Pact.Core.Test.StaticErrorTests
+    , Pact.Core.Test.ZkTests
+    , Pact.Core.Test.PoseidonTests
+    , Pact.Core.Test.LanguageServer
+    , Pact.Core.Test.GasGolden
+    , Pact.Core.Test.PrincipalTests
+    , Pact.Core.Test.ConTagGolden
+    , Pact.Core.Test.DocsTests
+    , Pact.Core.Test.JSONRoundtripTests
+    , Pact.Core.Test.LegacyDBRegression
+    , Pact.Core.Test.Keccak256Tests
+    , Paths_pact_tng
+    , Pact.Core.Test.SignatureSchemeTests
+    , Pact.Core.Test.PactServerTests
+    , Pact.Core.Test.PactContinuationTest
+    , Pact.Core.Test.ClientTests
+    , Pact.Core.Test.ServerUtils
+    , Pact.Core.Test.SlhSignaturesTests
+    , Pact.Core.Test.TransitiveDependencyTests
+    , Pact.Core.Test.ReplTestUtils
+    , Pact.Core.Test.TypecheckerTests
+  if (flag(with-crypto))
+    build-depends: pact-tng:pact-crypto

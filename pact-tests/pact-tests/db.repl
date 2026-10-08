@@ -1,0 +1,319 @@
+;  (env-exec-config ["DisablePact44"])
+(env-data { "k": { "keys": ["admin"], "pred": "keys-all" },
+            "k2": { "keys": ["admin"], "pred": "keys-all" } })
+(env-keys ["admin"])
+(begin-tx)
+(define-keyset 'dbtest-admin (read-keyset "k"))
+(module dbtest 'dbtest-admin
+
+  (defschema person
+    name:string
+    age:integer
+    dob:time)
+
+  (deftable persons:{person})
+
+  (deftable persons2:{person})
+
+  (defconst ID_A "A")
+  (defconst ROW_A:object{person}
+    { 'name:"joe", 'age:46, "dob":(parse-time "%F" "1970-01-01") })
+
+  (defun read-persons (k) (read persons k))
+
+  ;  (deftable stuff)
+
+  )
+(define-keyset 'dbtest2-admin (read-keyset "k2"))
+(module dbtest2 'dbtest2-admin
+  (defun read-persons2 (k)
+    (read-persons k)))
+
+(create-table persons)
+;  (create-table stuff)
+
+(commit-tx)
+(use dbtest)
+(begin-tx)
+(use dbtest)
+; Acquire module admin, should pass because admin key is in scope
+(expect "Module admin acquired successfully" "Module admin for module dbtest acquired" (acquire-module-admin dbtest))
+(insert persons ID_A ROW_A)
+(expect-failure "dupe key should fail" (insert persons ID_A ROW_A))
+(commit-tx)
+(begin-tx)
+(use dbtest)
+; acquire admin from db test
+(acquire-module-admin dbtest)
+(expect "keys works" [ID_A] (keys persons))
+
+;  (insert stuff "k" { "stuff": { "dec": 1.2, "bool": true, "int": -3, "time": (parse-time "%F" "1970-01-01") } })
+;  (expect "object stored as object" "object:*" (typeof (at "stuff" (read stuff "k"))))
+
+(expect "select works" [ROW_A] (select persons (where 'age (= 46))))
+(expect "select works (miss)" [] (select persons (where 'age (= 45))))
+
+(env-keys ["joe"])
+
+(expect "read-persons works w/o admin key" ROW_A (read-persons ID_A))
+(expect "read-persons2 works w/o admin key" ROW_A (dbtest2.read-persons2 ID_A))
+(commit-tx)
+
+;;
+;; test admin table guards
+(env-exec-config []) ;; clear disable history flag except pre-4.2.0
+(begin-tx)
+(use dbtest)
+(expect-failure "module admin protected by admin-key" "Keyset failure (keys-all): [admin...]" (acquire-module-admin dbtest))
+(expect-failure
+ "write protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (write persons "foo" ROW_A))
+(expect-failure
+ "update protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (update persons "foo" ROW_A))
+(expect-failure
+ "insert protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (insert persons "foo" ROW_A))
+(expect-failure
+ "keys protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (keys persons))
+(expect-failure
+ "read protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (read persons ID_A))
+(expect-failure
+ "with-read protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (with-read persons ID_A { 'name:= name } name))
+(expect-failure
+ "with-default-read protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (with-default-read persons ID_A { 'name: "stu" } { 'name:= name } name))
+(expect-failure
+ "select protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (select persons (constantly true)))
+(expect-failure
+ "keys protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (keys persons))
+(expect-failure
+ "create-table protected by admin key"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (create-table persons2))
+
+;; just making sure this doesn't blow up, output is still TBD on better Term output in general
+(describe-table persons)
+
+(commit-tx)
+;; test disabling admin table guards
+(env-exec-config ["AllowReadInLocal"])
+(use dbtest)
+(expect-failure
+ "write protected by admin key in local"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (write persons "foo" ROW_A))
+(expect-failure
+ "update protected by admin key in local"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (update persons "foo" ROW_A))
+(expect-failure
+ "insert protected by admin key in local"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (insert persons "foo" ROW_A))
+(expect
+ "keys allowed in local" [ID_A]
+ (keys persons))
+(expect
+ "read allowed in local" "joe"
+ (at "name" (read persons ID_A)))
+(expect
+ "with-read allowed in local" "joe"
+ (with-read persons ID_A { 'name:= name } name))
+(expect
+ "with-default-read allowed in local" "stu"
+ (with-default-read persons "zzz" { 'name: "stu" } { 'name:= name } name))
+(expect
+ "select allowed in local" [46]
+ (map (at "age") (select persons (constantly true))))
+(expect
+ "keys allowed in local" [ID_A]
+ (keys persons))
+(expect-failure
+ "create-table protected by admin key in local"
+ "Module admin necessary for operation but has not been acquired:dbtest"
+ (create-table persons2))
+
+
+;; fold-db tests + key sort guarantees
+(env-exec-config [])
+
+(module fdb G
+  (defcap G () true)
+  (defschema fdb-test a:integer b:integer)
+  (deftable fdb-tbl:{fdb-test})
+)
+
+(create-table fdb-tbl)
+;; inserts shuffled to test key sort guarantees:
+;; (insert fdb-tbl 'a {'a:1, 'b:1})
+;; (insert fdb-tbl 'b {'a:2, 'b:2})
+;; (insert fdb-tbl 'c {'a:3, 'b:3})
+;; (insert fdb-tbl 'd {'a:4, 'b:4})
+(insert fdb-tbl 'b {'a:2, 'b:2})
+(insert fdb-tbl 'd {'a:4, 'b:4})
+(insert fdb-tbl 'c {'a:3, 'b:3})
+(insert fdb-tbl 'a {'a:1, 'b:1})
+
+
+(expect
+  "fold-db query filters correctly by key"
+  ["a" "b"]
+  (let*
+    ((qry (lambda (k o)  (< k "c")))
+     (consume (lambda (k o) k))
+    )
+    (fold-db fdb-tbl (qry) (consume))
+    ))
+
+(expect
+  "fold-db query filters correctly by key"
+  ["a" "b"]
+  (let*
+    ((qry (lambda (k o)  (< k "c")))
+     (consume (lambda (k o) k))
+    )
+    (fold-db fdb-tbl (qry) (consume))
+    ))
+
+(expect
+  "fold-db query handles key/obj transform correctly"
+  [["a" 1] ["b" 2]]
+  (let*
+    ((qry (lambda (k o)  (< k "c")))
+     (consume (lambda (k o) [k (at 'a o)]))
+    )
+    (fold-db fdb-tbl (qry) (consume))
+    ))
+
+(expect
+  "fold-db spits out all entries on true qry"
+  [{'entry:'a, 'value:{'a:1, 'b:1}} {'entry:'b, 'value:{'a:2, 'b:2}} {'entry:'c, 'value:{'a:3, 'b:3}} {'entry:'d, 'value:{'a:4, 'b:4}}]
+  (let*
+    ((qry (lambda (k o) true))
+     (consume (lambda (k o) {'entry:k, 'value:o}))
+    )
+    (fold-db fdb-tbl (qry) (consume))
+    ))
+
+(expect
+  "sorted output for keys native for pact 4.2.0"
+  ["a" "b" "c" "d"]
+  (keys fdb-tbl)
+  )
+
+(expect
+  "sorted output based on keys from select for pact 4.2.0"
+  [{"a": 1} {"a": 2} {"a": 3} {"a": 4}]
+  (select fdb-tbl ['a] (constantly true))
+  )
+
+(expect
+  "fold-db query handles key/obj transform correctly: inline lambdas version"
+  [["a" 1] ["b" 2]]
+  (fold-db fdb-tbl (lambda (k o)  (< k "c")) (lambda (k o) [k (at 'a o)]))
+  )
+
+; Ensure keys is distinct
+; Due to the increasing nature of TXIDs and table entries, what we need to actually check is that
+; if we update keys in different transactions, keys returns only distinct keys in
+; TXIDs
+(begin-tx)
+(module m g (defcap g () true)
+(defschema sc a:integer b:integer)
+(deftable tbl:{sc})
+
+(defun add-elem(a:integer k:string)
+  (write tbl k {"a":a, "b":a})
+)
+
+(defun update-elem(a:integer k:string)
+  (update tbl k {"a":a})
+)
+
+(defun all-elems()
+  (fold-db tbl (lambda (x y) true) (lambda (k o) {"key":k, "value":o}))
+)
+)
+(create-table tbl)
+(commit-tx)
+
+; Add two entries
+(begin-tx)
+(m.add-elem 1 "jose")
+(m.add-elem 1 "robert")
+(commit-tx)
+
+(begin-tx)
+(m.update-elem 2 "jose")
+(m.update-elem 3 "robert")
+(commit-tx)
+
+(begin-tx)
+(expect "All-elems return distinct objects"
+  [ {"key": "jose","value": {"a": 2,"b": 1}}
+  , {"key": "robert","value": {"a": 3,"b": 1}} ]
+  (m.all-elems))
+
+(commit-tx)
+
+; Regression for read with fields
+(begin-tx)
+(use m)
+(acquire-module-admin m)
+(expect "reading with a single field restricts the value to that field" {"a": 2} (read tbl "jose" ["a"]))
+(expect "reading with a no fields returns the full object" {"a": 2,"b": 1} (read tbl "jose" []))
+(expect "selecting with fields on empty fields" [{"a": 2} {"a": 3}] (select tbl ["a"] (constantly true)))
+(expect "selecting with fields with no fields results in empty objects" [{} {}] (select tbl [] (constantly true)))
+(commit-tx)
+
+; DB regression
+(begin-tx)
+(module table-abstraction g (defcap g () true)
+  (defschema sc a:integer b:integer)
+  (defschema sc2 a:integer b:integer c:string)
+  (defschema sc3 a:integer b:integer)
+  (deftable tbl:{sc})
+  (deftable tbl2:{sc2})
+  (deftable tbl3:{sc3})
+  (deftable tbl4:{sc})
+
+  (defun write-to-table:unit (tv:table{sc} k:string v:object{sc})
+    (write tv k v)
+    ()
+  )
+
+  (defun read-from-tables:[object{sc}] (tvs:[table{sc}] k:string)
+    (map (lambda (tv) (read tv k)) tvs)
+  )
+
+)
+
+(create-table tbl)
+(create-table tbl2)
+(create-table tbl3)
+(create-table tbl4)
+
+(expect "can write to table tbl" () (write-to-table tbl "jose" {"a": 1, "b": 2}))
+(expect-failure "Cannot write to tbl2: different schema" "Runtime typecheck failure" (write-to-table tbl2 "jose" {"a": 2, "b": 2}))
+(expect "can write to table tbl4: same schema" () (write-to-table tbl4 "jose" {"a": 3, "b": 2}))
+(expect "can write to table tbl3: different schema, same structure" () (write-to-table tbl3 "jose" {"a": 4, "b": 2}))
+
+(expect "can read from tables with the same schema" [{"a": 1,"b": 2} {"a": 3,"b": 2} {"a": 4,"b": 2}]  (read-from-tables [tbl, tbl4, tbl3] "jose"))
+(expect-failure "Cannot read from tables with different schema" "Runtime typecheck failure" (read-from-tables [tbl, tbl2] "jose"))
+
+(commit-tx)
